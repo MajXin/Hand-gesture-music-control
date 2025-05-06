@@ -1,45 +1,49 @@
 import cv2
 import mediapipe as mp
+import pygame
+import math
+import time
+import numpy as np
 
+# Initialize pygame mixer
+pygame.mixer.init()
+pygame.mixer.music.load("rock.mp3")
 
-# Initialize MediaPipe Hand model
+# MediaPipe setup
 mp_hands = mp.solutions.hands
-hands = mp_hands.Hands(min_detection_confidence=0.5, min_tracking_confidence=0.5)
+hands = mp_hands.Hands(min_detection_confidence=0.6, min_tracking_confidence=0.6)
 mp_drawing = mp.solutions.drawing_utils
 
-# Start video capture
 cap = cv2.VideoCapture(0)
 
+# State
+is_playing = True
+last_toggle_time = time.time()
+cooldown = 1.5  # seconds
+
+pygame.mixer.music.play(-1)  # Loop the music
+pygame.mixer.music.set_volume(0.5)  # Initial volume
+
 def is_fist(landmarks):
-    # Check if all fingertips are below their respective PIP joints (folded fingers)
-    finger_tips = [
-        mp_hands.HandLandmark.INDEX_FINGER_TIP,
-        mp_hands.HandLandmark.MIDDLE_FINGER_TIP,
-        mp_hands.HandLandmark.RING_FINGER_TIP,
-        mp_hands.HandLandmark.PINKY_TIP
-    ]
+    finger_tips = [8, 12, 16, 20]
+    finger_pips = [6, 10, 14, 18]
+    folded = sum(1 for tip, pip in zip(finger_tips, finger_pips)
+                 if landmarks[tip].y > landmarks[pip].y)
+    thumb_folded = abs(landmarks[4].x - landmarks[3].x) < 0.05
+    return folded >= 3 and thumb_folded
 
-    finger_pips = [
-        mp_hands.HandLandmark.INDEX_FINGER_PIP,
-        mp_hands.HandLandmark.MIDDLE_FINGER_PIP,
-        mp_hands.HandLandmark.RING_FINGER_PIP,
-        mp_hands.HandLandmark.PINKY_PIP
-    ]
+def is_open_fist(landmarks):
+    thumb_tip = landmarks[4]
+    index_tip = landmarks[8]
+    distance = math.hypot(thumb_tip.x - index_tip.x, thumb_tip.y - index_tip.y)
+    return distance > 0.15
 
-    folded_fingers = 0
-    for tip, pip in zip(finger_tips, finger_pips):
-        if landmarks[tip].y > landmarks[pip].y:
-            folded_fingers += 1
-
-    # Optional: check if thumb is near palm
-    thumb_tip = landmarks[mp_hands.HandLandmark.THUMB_TIP]
-    thumb_ip = landmarks[mp_hands.HandLandmark.THUMB_IP]
-    if abs(thumb_tip.x - thumb_ip.x) < 0.05:
-        thumb_folded = True
-    else:
-        thumb_folded = False
-
-    return folded_fingers >= 3 and thumb_folded
+def calculate_volume(thumb_tip, index_tip):
+    distance = math.hypot(thumb_tip.x - index_tip.x, thumb_tip.y - index_tip.y)
+    # Scale distance: min=0.02 (close), max=0.25 (far), clamp between 0 and 1
+    volume = np.interp(distance, [0.02, 0.25], [0.0, 1.0])
+    volume = np.clip(volume, 0.0, 1.0)
+    return volume
 
 while cap.isOpened():
     ret, frame = cap.read()
@@ -53,18 +57,41 @@ while cap.isOpened():
     if results.multi_hand_landmarks:
         for hand_landmarks in results.multi_hand_landmarks:
             mp_drawing.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
+            landmarks = hand_landmarks.landmark
 
-            if is_fist(hand_landmarks.landmark):
-                cv2.putText(frame, "Fist Gesture Detected", (50, 50),
-                            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-            else:
-                cv2.putText(frame, "Open Hand Detected", (50, 50),
-                            cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2)
+            thumb_tip = landmarks[4]
+            index_tip = landmarks[8]
 
-    # Show the frame with gesture text
-    cv2.imshow("Hand Gesture Detection", frame)
+            # Volume control
+            volume = calculate_volume(thumb_tip, index_tip)
+            pygame.mixer.music.set_volume(volume)
+            vol_percent = int(volume * 100)
+            cv2.putText(frame, f'Volume: {vol_percent}%', (30, 90),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
+
+            # Play/pause toggle
+            current_time = time.time()
+            if current_time - last_toggle_time > cooldown:
+                if is_playing and is_fist(landmarks):
+                    pygame.mixer.music.pause()
+                    is_playing = False
+                    last_toggle_time = current_time
+                    print("Paused")
+                    cv2.putText(frame, "Fist - Paused", (30, 50),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+
+                elif not is_playing and is_open_fist(landmarks):
+                    pygame.mixer.music.unpause()
+                    is_playing = True
+                    last_toggle_time = current_time
+                    print("Resumed")
+                    cv2.putText(frame, "Open - Resumed", (30, 50),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+
+    cv2.imshow("Gesture Music Control", frame)
 
     if cv2.waitKey(1) & 0xFF == ord('q'):
+        pygame.mixer.music.stop()
         break
 
 cap.release()
