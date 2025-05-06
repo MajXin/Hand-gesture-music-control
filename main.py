@@ -31,6 +31,25 @@ while cap.isOpened():
     # Display the frame
     cv2.imshow("Hand Gesture Detection", frame)
 
+    def is_fist(landmarks):
+    # A simple check using the distance between thumb and index finger (can be expanded)
+        thumb_tip = landmarks[mp_hands.HandLandmark.THUMB_TIP]
+        index_tip = landmarks[mp_hands.HandLandmark.INDEX_FINGER_TIP]
+    
+    # If the distance between thumb and index is small, it's a fist
+        distance = ((thumb_tip.x - index_tip.x)**2 + (thumb_tip.y - index_tip.y)**2) ** 0.5
+        return distance < 0.05  # Threshold for fist detection
+
+    # Inside the while loop:
+    if results.multi_hand_landmarks:
+        for landmarks in results.multi_hand_landmarks:
+            if is_fist(landmarks.landmark):
+                cv2.putText(frame, "Fist Gesture Detected", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+            else:
+                cv2.putText(frame, "Open Hand Detected", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2)
+     # Display the frame text
+    cv2.imshow("Hand Detection", frame)
+
     # Exit if the user presses 'q'
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
